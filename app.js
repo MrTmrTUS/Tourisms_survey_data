@@ -1,7 +1,8 @@
 /* Khảo sát P1.6.1 — bản online.
    Câu hỏi, bản dịch, thứ tự cột: survey_data.js (sinh từ _build_P1.2/make_web161.py, không sửa tay). Cấu hình: config.js.
    Mã hóa theo codebook: thang 1–7; NB = 98; bỏ trống = 99; không hiển thị vì đã dừng ở câu sàng lọc = 97; MODE = 2.
-   Lưu dở sau mỗi trang (SUBMITTED = 0) và gửi bản cuối (SUBMITTED = 1); mất mạng thì giữ trong hàng đợi trên máy và gửi lại. */
+   Phải trả lời đủ câu trên trang mới sang trang. Tiến độ chỉ lưu trên máy (làm tiếp trong 12 giờ); chỉ gửi khi bấm Gửi
+   (SUBMITTED = 1), nên phiếu bỏ dở không vào sheet. Chưa tới được máy chủ thì bản ghi nằm trong hàng đợi trên máy và gửi lại. */
 (function () {
   'use strict';
   var S = window.SURVEY, C = window.SURVEY_CONFIG || {};
@@ -9,7 +10,7 @@
   var params = new URLSearchParams(location.search);
   var STAFF = params.get('staff') === '1', ADMIN = params.get('admin') === '1';
   var app = document.getElementById('app');
-  var st = null, timerId = null, confirmedSkip = {}, netState = '', flushing = false, flushAgain = false, uid = 0;
+  var st = null, timerId = null, netState = '', flushing = false, flushAgain = false, curCtl = null, everFailed = false, uid = 0;
 
   // ---------------- lưu trên máy (mọi thao tác đều bọc try/catch) ----------------
   function get(k, d) { try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
@@ -26,6 +27,19 @@
   }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   function rich(s) { return esc(s).replace(/\[A\]/g, '<b class="ax">A</b>').replace(/\[X\]/g, '<b class="ax">X</b>'); }
+  // đoạn văn cách nhau bằng xuống dòng; dòng bắt đầu bằng "- " thành gạch đầu dòng
+  function paras(s) {
+    var out = '', li = [];
+    String(s || '').split(/\n+/).forEach(function (line) {
+      line = line.trim(); if (!line) return;
+      if (/^- /.test(line)) { li.push('<li>' + rich(line.slice(2)) + '</li>'); return; }
+      if (li.length) { out += '<ul>' + li.join('') + '</ul>'; li = []; }
+      out += '<p>' + rich(line) + '</p>';
+    });
+    return out + (li.length ? '<ul>' + li.join('') + '</ul>' : '');
+  }
+  // độ cao đầu trang thật (đổi theo cỡ chữ, cỡ màn hình) để dải A, X và thông báo nằm ngay dưới
+  function syncTop() { var h = document.querySelector('.top'); if (h) document.documentElement.style.setProperty('--top-h', h.offsetHeight + 'px'); }
   function htmlLang(c) { return c === 'zh' ? 'zh-Hans' : c; }
   function langOf(c) { return S.langs.filter(function (l) { return l.code === c; })[0]; }
   function flag(code, cls) {
@@ -60,14 +74,15 @@
     var d = document.createElement('div'); d.className = 'toast'; d.textContent = msg; document.body.appendChild(d);
     setTimeout(function () { d.remove(); }, 3500);
   }
-  function modal(title, body, b1, b2, f1, f2) {
+  function modal(title, body, b1, b2, f1, f2) {     // b2 = null: hộp thoại một nút
     var m = document.createElement('div'); m.className = 'modal';
     m.innerHTML = '<div class="modal-card" role="dialog" aria-modal="true"><h3>' + esc(title) + '</h3><p>' + esc(body) + '</p><div class="acts">' +
-      '<button class="btn ghost" data-a="1">' + esc(b1) + '</button><button class="btn primary" data-a="2">' + esc(b2) + '</button></div></div>';
+      (b2 == null ? '<button class="btn primary" data-a="1">' + esc(b1) + '</button>'
+        : '<button class="btn ghost" data-a="1">' + esc(b1) + '</button><button class="btn primary" data-a="2">' + esc(b2) + '</button>') + '</div></div>';
     document.body.appendChild(m);
     m.querySelector('[data-a="1"]').onclick = function () { m.remove(); f1(); };
-    m.querySelector('[data-a="2"]').onclick = function () { m.remove(); f2(); };
-    m.querySelector('[data-a="2"]').focus();
+    if (b2 != null) m.querySelector('[data-a="2"]').onclick = function () { m.remove(); f2(); };
+    m.querySelector(b2 == null ? '[data-a="1"]' : '[data-a="2"]').focus();
   }
 
   // ---------------- trạng thái ----------------
@@ -133,32 +148,45 @@
     var chain = Promise.resolve();
     q0.forEach(function (item) {
       chain = chain.then(function () {
+        // mạng chặn Google (vd. SIM Trung Quốc chuyển vùng) thường treo chứ không báo lỗi: quá 15 giây thì coi là chưa gửi được
+        var ctl = window.AbortController ? new AbortController() : null, tm = ctl ? setTimeout(function () { ctl.abort(); }, 15000) : null;
+        curCtl = ctl;
         return fetch(C.ENDPOINT, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, keepalive: true,   // vẫn gửi khi trang đã đóng
+          signal: ctl ? ctl.signal : undefined,
           body: JSON.stringify({ token: C.TOKEN, columns: S.columns, string_cols: S.string_cols, record: item.rec }) })
           .then(function (res) { return res.json(); })
           .then(function (j) {
+            clearTimeout(tm);
             if (!j.ok) throw new Error(j.error || 'server');
             set(K_QUEUE, get(K_QUEUE, []).filter(function (x) { return !(x.rec.RESP_ID === item.rec.RESP_ID && x.seq === item.seq); }));
-          });
+          }, function (e) { clearTimeout(tm); throw e; });
       });
     });
-    return chain.then(function () { netState = 'saved'; }, function () { netState = 'offline'; })
+    return chain.then(function () { netState = 'saved'; }, function () { netState = 'offline'; everFailed = true; })
       .then(function () {
-        flushing = false;
-        if (netState !== 'offline' && (flushAgain || get(K_QUEUE, []).length)) return flush();   // bản ghi mới vào hàng đợi trong lúc gửi
+        flushing = false; curCtl = null;
+        // có yêu cầu gửi lại trong lúc đang gửi (bản ghi mới, nút Gửi lại): gửi thêm một lượt, kể cả khi lượt vừa rồi thất bại
+        if (flushAgain || (netState !== 'offline' && get(K_QUEUE, []).length)) return flush();
         showNet();
       });
   }
-  function sendPartial() { if (st.ans.CONSENT === 1) { enqueue(record(false)); flush(); } }
+  // trang kết thúc: chỉ báo "đã ghi nhận" khi hàng đợi trống; đã thử mà chưa tới được máy chủ thì giữ lời dặn
+  // (giữ trang mở, nối Wi-Fi) và nút Gửi lại cho tới khi gửi được, kể cả trong lúc website tự thử lại
   function showNet() {
-    var el = document.getElementById('net'); if (!el) return;
+    var el = document.getElementById('net'), body = document.getElementById('endbody');
+    var ico = document.getElementById('endico'), retry = document.getElementById('retry');
+    var pending = !!C.ENDPOINT && get(K_QUEUE, []).length > 0;
+    if (!pending) everFailed = false;
+    var unsent = pending && everFailed;
+    if (body) body.textContent = !pending ? body.getAttribute('data-done') : (unsent ? t('ui.unsent_body') : t('ui.saving'));
+    if (ico) { ico.textContent = unsent ? '!' : '✓'; ico.className = 'ico' + (unsent ? ' warn' : ''); }
+    if (retry) retry.hidden = !unsent;
+    if (!el) return;
     el.className = 'netmsg';
-    if (!C.ENDPOINT) { el.textContent = (st && st.done) ? 'TEST MODE — no server configured; data kept on this device (?admin=1).' : ''; return; }
-    var pending = get(K_QUEUE, []).length > 0;
-    if (netState === 'offline') { el.textContent = t('ui.offline'); el.className = 'netmsg off'; }
-    else if (netState === 'saving' || (pending && st && st.done)) el.textContent = t('ui.saving');
-    else if (netState === 'saved' && st && st.done && !pending) el.textContent = t('ui.saved');
-    else el.textContent = '';
+    if (!C.ENDPOINT) el.textContent = (st && st.done) ? 'TEST MODE — no server configured; data kept on this device (?admin=1).' : '';
+    else if (!body) el.textContent = '';
+    else if (!pending) el.textContent = netState === 'saved' ? t('ui.saved') : '';
+    else el.textContent = unsent && netState === 'saving' ? t('ui.saving') : '';
   }
 
   // ---------------- đồng hồ ----------------
@@ -181,7 +209,7 @@
           '<span>' + esc(l.name) + '</span><span class="arrow">›</span></button>';
       }).join('') + '</div></div></div>';
     app.querySelectorAll('.lang-btn').forEach(function (b) {
-      b.addEventListener('click', function () { st = newState(b.getAttribute('data-lang')); confirmedSkip = {}; save(); renderPage(); });
+      b.addEventListener('click', function () { st = newState(b.getAttribute('data-lang')); save(); renderPage(); });
     });
   }
 
@@ -200,10 +228,11 @@
   function intro() {
     var da = C.DATA_ACCESS;
     var data = typeof da === 'string' ? da : (da ? (da[st.lang] || da.en || '') : '');
-    return '<h1 class="title">' + esc(t('title')) + '</h1><div class="card"><p style="margin-top:0">' + esc(t('intro')) + '</p>' +
-      '<div class="contacts"><div><b>' + esc(t('lbl.team')) + ':</b> ' + esc(C.RESEARCH_TEAM) + '</div>' +
-      '<div><b>' + esc(t('lbl.contact')) + ':</b> ' + esc(C.CONTACT_EMAIL) + '</div>' +
-      '<div><b>' + esc(t('lbl.data')) + ':</b> ' + esc(data) + '</div></div></div>';
+    var rows = [['lbl.team', C.RESEARCH_TEAM], ['lbl.contact', C.CONTACT_EMAIL], ['lbl.data', data]].map(function (r) {
+      return r[1] ? '<div><b>' + esc(t(r[0])) + ':</b> ' + esc(r[1]) + '</div>' : '';   // mục để trống trong config.js thì không hiện
+    }).join('');
+    return '<h1 class="title">' + esc(t('title')) + '</h1><div class="card intro">' + paras(t('intro')) +
+      (rows ? '<div class="contacts">' + rows + '</div>' : '') + '</div>';
   }
   function choiceHtml(b) {
     var opts = b.opts.map(function (o) { return { v: o[0], txt: t(o[1]) }; });
@@ -267,7 +296,7 @@
     document.getElementById('next').addEventListener('click', function () { next(p); });
     var bb = document.getElementById('back'); if (bb) bb.addEventListener('click', back);
     var cl = document.getElementById('chlang'); if (cl) cl.addEventListener('click', function () { st = null; del(K_STATE); stopTimer(); renderLang(); });
-    startTimer(); showNet();
+    startTimer(); showNet(); syncTop();
   }
   function onAnswer(e) {
     var name = e.target.name, v = parseInt(e.target.value, 10);
@@ -308,17 +337,13 @@
       var b = p.blocks[i];
       if (b.type === 'choice' && b.stop != null && visible(b) && st.ans[b.var] === b.stop) return finish(b.var);
     }
-    var miss = unanswered(p);
-    if (miss.length && !confirmedSkip[p.id]) {
-      return modal(t('ui.unanswered_title'), t('ui.unanswered_body'), t('ui.answer_them'), t('ui.continue'),
-        function () { mark(miss); }, function () { confirmedSkip[p.id] = true; next(p); });
-    }
+    var miss = unanswered(p);                                // bắt buộc trả lời đủ câu trên trang (câu thang đo có NB để thoát)
+    if (miss.length) return modal(t('ui.unanswered_title'), t('ui.unanswered_body'), t('ui.answer_them'), null, function () { mark(miss); });
     leavePage(p);
     if (st.page === S.pages.length - 1) return finish(null);
     st.page += 1; st.maxPage = Math.max(st.maxPage, st.page); save();
     try { history.pushState({ p: st.page }, ''); } catch (e) { }
-    sendPartial();
-    renderPage(); window.scrollTo(0, 0);
+    renderPage(); window.scrollTo(0, 0);                   // không gửi bản lưu dở: chỉ gửi khi bấm Gửi (phiếu bỏ dở không vào sheet)
   }
   function back() {
     if (!st || st.done || st.page === 0) return;
@@ -356,12 +381,17 @@
     var body = decline ? t('ui.decline_body') : (stopped ? t('ui.stop_body') : t('ui.thanks_body'));
     document.documentElement.lang = htmlLang(st.lang);
     app.innerHTML = '<header class="top"><div class="top-in"><div class="brand">' + esc(t('title')) + '</div></div><div class="bar"><i style="width:100%"></i></div></header>' +
-      '<main><div class="card end"><div class="ico">✓</div><h1>' + esc(title) + '</h1><p>' + esc(body) + '</p><p class="netmsg" id="net"></p>' +
+      '<main><div class="card end"><div class="ico" id="endico">✓</div><h1>' + esc(title) + '</h1><p id="endbody" data-done="' + esc(body) + '"></p>' +
+      '<button class="btn primary" id="retry" hidden>' + esc(t('ui.retry')) + '</button><p class="netmsg" id="net"></p>' +
       (STAFF ? '<button class="btn primary" id="newq" style="margin-top:16px">' + esc(S.staff['new'][0]) + ' · ' + esc(S.staff['new'][1]) + '</button>' : '') +
       '</div></main>';
     showNet();
+    document.getElementById('retry').onclick = function () {      // bỏ lượt đang treo (nếu có) và gửi ngay một lượt mới
+      netState = 'saving'; showNet();
+      if (flushing) { flushAgain = true; if (curCtl) curCtl.abort(); } else flush();
+    };
     var nq = document.getElementById('newq');
-    if (nq) nq.onclick = function () { del(K_STATE); st = null; confirmedSkip = {}; renderLang(); };
+    if (nq) nq.onclick = function () { del(K_STATE); st = null; renderLang(); };
   }
 
   // ---------------- trang quản trị (?admin=1): hàng đợi, tải CSV, đếm phiếu, tạo link ----------------
@@ -405,6 +435,8 @@
   // ---------------- khởi động ----------------
   function init() {
     window.addEventListener('online', flush);
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) flush(); });   // quay lại trang (vd. sau khi nối Wi-Fi)
+    window.addEventListener('resize', syncTop);
     setInterval(flush, 60000);
     if (ADMIN) { renderAdmin(); return; }
     if (params.get('new') === '1') del(K_STATE);

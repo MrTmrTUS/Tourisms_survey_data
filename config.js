@@ -7,9 +7,10 @@ window.SURVEY_CONFIG = {
   TOKEN: "7bF4GI71gGXhSKCQ8ar7NAn9",
   // Hiện đồng hồ đếm thời gian làm bài ở đầu trang (thời gian luôn được ghi dù hiện hay ẩn).
   SHOW_TIMER: true,
-  // Thông tin trên trang đồng ý tham gia (thay các ô trong ngoặc vuông).
-  RESEARCH_TEAM: "[RESEARCH_TEAM]",
-  CONTACT_EMAIL: "[CONTACT_EMAIL]",
+  // Ba dòng dưới đoạn giới thiệu; để trống ("") thì dòng đó không hiện. Từ 25/10/2026 phần giới thiệu đã ghi
+  // trường, nghiên cứu viên, điện thoại, email và cam kết bảo mật, nên ba dòng này để trống.
+  RESEARCH_TEAM: "",
+  CONTACT_EMAIL: "",
   // Có thể ghi riêng cho từng ngôn ngữ: en, fr, ru, es, zh, ko, vi; thiếu ngôn ngữ nào thì dùng bản en.
-  DATA_ACCESS: { en: "[DATA_ACCESS_AND_RETENTION]", vi: "[DATA_ACCESS_AND_RETENTION]" }
+  DATA_ACCESS: ""
 };
