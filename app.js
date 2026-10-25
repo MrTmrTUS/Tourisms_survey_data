@@ -1,12 +1,13 @@
 /* Khảo sát P1.6.1 — bản online.
    Câu hỏi, bản dịch, thứ tự cột: survey_data.js (sinh từ _build_P1.2/make_web161.py, không sửa tay). Cấu hình: config.js.
    Mã hóa theo codebook: thang 1–7; NB = 98; bỏ trống = 99; không hiển thị vì đã dừng ở câu sàng lọc = 97; MODE = 2.
-   Phải trả lời đủ câu trên trang mới sang trang. Tiến độ chỉ lưu trên máy (làm tiếp trong 12 giờ); chỉ gửi khi bấm Gửi
-   (SUBMITTED = 1), nên phiếu bỏ dở không vào sheet. Chưa tới được máy chủ thì bản ghi nằm trong hàng đợi trên máy và gửi lại. */
+   Phải trả lời đủ câu trên trang mới sang trang. Mỗi lần mở hoặc tải lại trang là một phiên mới (không lưu tiến độ);
+   chỉ gửi khi bấm Gửi (SUBMITTED = 1), nên phiếu bỏ dở không vào sheet. Chưa tới được máy chủ thì bản ghi nằm trong
+   hàng đợi trên máy và gửi lại. */
 (function () {
   'use strict';
   var S = window.SURVEY, C = window.SURVEY_CONFIG || {};
-  var K_STATE = 'p161_state', K_QUEUE = 'p161_queue', K_DONE = 'p161_done', K_SEQ = 'p161_seq';
+  var K_STATE = 'p161_state' /* chỉ để xóa tiến độ bản cũ để lại */, K_QUEUE = 'p161_queue', K_DONE = 'p161_done', K_SEQ = 'p161_seq';
   var params = new URLSearchParams(location.search);
   var STAFF = params.get('staff') === '1', ADMIN = params.get('admin') === '1';
   var app = document.getElementById('app');
@@ -16,7 +17,6 @@
   function get(k, d) { try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
   function set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* bộ nhớ đầy hoặc bị chặn */ } }
   function del(k) { try { localStorage.removeItem(k); } catch (e) { } }
-  function save() { if (st) { st.savedAt = Date.now(); set(K_STATE, st); } }
 
   // ---------------- chữ ----------------
   function lang() { return (st && st.lang) || 'en'; }
@@ -90,7 +90,7 @@
     var now = new Date();
     return { v: S.web_version, lang: code, id: makeId(now), startTs: isoLocal(now), startMs: now.getTime(), date: ymd(now),
       page: 0, maxPage: 0, ans: {}, ord: {}, times: {}, enter: Date.now(), done: false, stopVar: null, endTs: null, endMs: null,
-      compl: STAFF ? null : 1, session: cleanSession(params.get('s')), device: deviceType(), savedAt: Date.now() };
+      compl: STAFF ? null : 1, session: cleanSession(params.get('s')), device: deviceType() };
   }
   function visible(b) {
     if (!b.show_if) return true;
@@ -102,7 +102,6 @@
       var gs = b.groups.map(function (g) { return g.fixed ? g.items.slice() : shuffle(g.items); });
       st.ord[b.order + '_g'] = gs;
       st.ord[b.order] = [].concat.apply([], gs);
-      save();
     });
   }
 
@@ -181,6 +180,7 @@
     if (body) body.textContent = !pending ? body.getAttribute('data-done') : (unsent ? t('ui.unsent_body') : t('ui.saving'));
     if (ico) { ico.textContent = unsent ? '!' : '✓'; ico.className = 'ico' + (unsent ? ' warn' : ''); }
     if (retry) retry.hidden = !unsent;
+    var home = document.getElementById('home'); if (home) home.hidden = pending;
     if (!el) return;
     el.className = 'netmsg';
     if (!C.ENDPOINT) el.textContent = (st && st.done) ? 'TEST MODE — no server configured; data kept on this device (?admin=1).' : '';
@@ -209,7 +209,7 @@
           '<span>' + esc(l.name) + '</span><span class="arrow">›</span></button>';
       }).join('') + '</div></div></div>';
     app.querySelectorAll('.lang-btn').forEach(function (b) {
-      b.addEventListener('click', function () { st = newState(b.getAttribute('data-lang')); save(); renderPage(); });
+      b.addEventListener('click', function () { st = newState(b.getAttribute('data-lang')); renderPage(); });
     });
   }
 
@@ -295,12 +295,12 @@
     app.querySelectorAll('input[type=radio]').forEach(function (inp) { inp.addEventListener('change', onAnswer); });
     document.getElementById('next').addEventListener('click', function () { next(p); });
     var bb = document.getElementById('back'); if (bb) bb.addEventListener('click', back);
-    var cl = document.getElementById('chlang'); if (cl) cl.addEventListener('click', function () { st = null; del(K_STATE); stopTimer(); renderLang(); });
+    var cl = document.getElementById('chlang'); if (cl) cl.addEventListener('click', function () { st = null; stopTimer(); renderLang(); });
     startTimer(); showNet(); syncTop();
   }
   function onAnswer(e) {
     var name = e.target.name, v = parseInt(e.target.value, 10);
-    st.ans[name] = v; save();
+    st.ans[name] = v;
     var wrap = e.target.closest('[data-var]');
     if (wrap) {
       wrap.classList.remove('missing');
@@ -311,7 +311,7 @@
       if (b.type !== 'choice' || !b.show_if || !(name in b.show_if)) return;
       var fs = app.querySelector('fieldset[data-var="' + b.var + '"]'), vis = visible(b);
       fs.hidden = !vis;
-      if (!vis) { delete st.ans[b.var]; fs.querySelectorAll('input').forEach(function (i) { i.checked = false; }); save(); }
+      if (!vis) { delete st.ans[b.var]; fs.querySelectorAll('input').forEach(function (i) { i.checked = false; }); }
     });
   }
   function unanswered(p) {
@@ -341,25 +341,25 @@
     if (miss.length) return modal(t('ui.unanswered_title'), t('ui.unanswered_body'), t('ui.answer_them'), null, function () { mark(miss); });
     leavePage(p);
     if (st.page === S.pages.length - 1) return finish(null);
-    st.page += 1; st.maxPage = Math.max(st.maxPage, st.page); save();
+    st.page += 1; st.maxPage = Math.max(st.maxPage, st.page);
     try { history.pushState({ p: st.page }, ''); } catch (e) { }
     renderPage(); window.scrollTo(0, 0);                   // không gửi bản lưu dở: chỉ gửi khi bấm Gửi (phiếu bỏ dở không vào sheet)
   }
   function back() {
     if (!st || st.done || st.page === 0) return;
-    leavePage(S.pages[st.page]); st.page -= 1; save(); renderPage(); window.scrollTo(0, 0);
+    leavePage(S.pages[st.page]); st.page -= 1; renderPage(); window.scrollTo(0, 0);
   }
 
   // ---------------- kết thúc ----------------
   function finish(stopVar) {
     leavePage(S.pages[st.page]);
     var now = new Date();
-    st.stopVar = stopVar; st.endTs = isoLocal(now); st.endMs = now.getTime(); st.done = true; save();
+    st.stopVar = stopVar; st.endTs = isoLocal(now); st.endMs = now.getTime(); st.done = true;
     stopTimer();
     if (STAFF && !stopVar) return renderStaff();
     submitFinal();
   }
-  function submitFinal() { var rec = record(true); keepDone(rec); enqueue(rec); save(); renderEnd(); flush(); }
+  function submitFinal() { var rec = record(true); keepDone(rec); enqueue(rec); renderEnd(); flush(); }
   function renderStaff() {
     var T = S.staff;
     app.innerHTML = '<header class="top"><div class="top-in"><div class="brand">' + esc(T.title[0]) + ' · ' + esc(T.title[1]) + '</div></div></header><main>' +
@@ -371,7 +371,7 @@
     document.getElementById('staffsave').onclick = function () {
       var c = app.querySelector('input[name=COMPL_MODE]:checked');
       if (!c) return;
-      st.compl = parseInt(c.value, 10); save(); submitFinal();
+      st.compl = parseInt(c.value, 10); submitFinal();
     };
   }
   function renderEnd() {
@@ -383,15 +383,18 @@
     app.innerHTML = '<header class="top"><div class="top-in"><div class="brand">' + esc(t('title')) + '</div></div><div class="bar"><i style="width:100%"></i></div></header>' +
       '<main><div class="card end"><div class="ico" id="endico">✓</div><h1>' + esc(title) + '</h1><p id="endbody" data-done="' + esc(body) + '"></p>' +
       '<button class="btn primary" id="retry" hidden>' + esc(t('ui.retry')) + '</button><p class="netmsg" id="net"></p>' +
-      (STAFF ? '<button class="btn primary" id="newq" style="margin-top:16px">' + esc(S.staff['new'][0]) + ' · ' + esc(S.staff['new'][1]) + '</button>' : '') +
+      (STAFF ? '<button class="btn primary" id="newq" style="margin-top:16px">' + esc(S.staff['new'][0]) + ' · ' + esc(S.staff['new'][1]) + '</button>'
+        : '<button class="btn primary" id="home" hidden>' + esc(t('ui.home')) + '</button>') +     // hiện khi câu trả lời đã lưu xong
       '</div></main>';
     showNet();
+    var hm = document.getElementById('home');
+    if (hm) hm.onclick = function () { st = null; renderLang(); window.scrollTo(0, 0); };
     document.getElementById('retry').onclick = function () {      // bỏ lượt đang treo (nếu có) và gửi ngay một lượt mới
       netState = 'saving'; showNet();
       if (flushing) { flushAgain = true; if (curCtl) curCtl.abort(); } else flush();
     };
     var nq = document.getElementById('newq');
-    if (nq) nq.onclick = function () { del(K_STATE); st = null; renderLang(); };
+    if (nq) nq.onclick = function () { st = null; renderLang(); };
   }
 
   // ---------------- trang quản trị (?admin=1): hàng đợi, tải CSV, đếm phiếu, tạo link ----------------
@@ -439,12 +442,16 @@
     window.addEventListener('resize', syncTop);
     setInterval(flush, 60000);
     if (ADMIN) { renderAdmin(); return; }
-    if (params.get('new') === '1') del(K_STATE);
-    var s = get(K_STATE, null), fresh = s && s.v === S.web_version && Date.now() - (s.savedAt || 0) < 12 * 3600 * 1000;
-    if (fresh && !s.done) { st = s; st.enter = Date.now(); renderPage(); toast(t('ui.resumed')); }
-    else if (fresh && s.done && !STAFF) { st = s; renderEnd(); }
-    else { st = null; renderLang(); }
+    // mỗi lần mở hoặc tải lại trang là một phiên mới; tiến độ không lưu trên máy (máy dùng chung không lộ câu trả lời
+    // của người trước). Xóa tiến độ do bản cũ (trước 25/10/2026 tối) để lại. Hàng đợi chưa gửi (K_QUEUE) vẫn giữ và gửi tiếp.
+    del(K_STATE);
+    st = null; renderLang();
     window.addEventListener('popstate', function () { if (st && !st.done && st.page > 0) back(); });
+    // tải lại/đóng trang khi đang làm dở (mất câu trả lời) hoặc khi phiếu chưa gửi được: trình duyệt hỏi lại
+    window.addEventListener('beforeunload', function (e) {
+      var unsent = st && st.done && !!C.ENDPOINT && get(K_QUEUE, []).length > 0;
+      if ((st && !st.done && st.page > 0) || unsent) { e.preventDefault(); e.returnValue = ''; }
+    });
     flush();
   }
   window.__P161 = { record: function (f) { return st && record(!!f); }, state: function () { return st; } };   // phục vụ kiểm thử
