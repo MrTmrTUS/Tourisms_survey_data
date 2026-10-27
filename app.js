@@ -301,7 +301,8 @@
     switch (b.type) {
       case 'intro': return intro();
       case 'box': return '<div class="box"><p>' + rich(t(b.key)) + '</p></div>';
-      case 'box2': return '<div class="box"><p><b>' + rich(t('p2.lead')) + '</b></p><p>' + rich(t('p2.body')) + '</p><p>' + rich(t('p2.defs')) + '</p></div>';
+      case 'box2': return '<div class="box"><p><b>' + rich(t('p2.lead')) + '</b></p><p>' + rich(t('p2.body')) + '</p><p>' +
+        t('p2.defs').split(/\s*[·／]\s*(?=\[\[)/).map(rich).join('<br>') + '</p></div>';   // mỗi định nghĩa (A, X) một dòng
       case 'instr': return '<p class="instr">' + rich(t(b.key)) + '</p>';
       case 'choice': return choiceHtml(b);
       case 'likert': return likertHtml(b);
