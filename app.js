@@ -26,7 +26,11 @@
     return s;
   }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
-  function rich(s) { return esc(s).replace(/\[A\]/g, '<b class="ax">A</b>').replace(/\[X\]/g, '<b class="ax">X</b>'); }
+  // [[cụm từ]] = cụm từ tô đậm màu xanh (trợ lý AI, phương án được gợi ý); [A], [X] = ký hiệu A, X (các ngôn ngữ chưa đổi)
+  function rich(s) {
+    return esc(s).replace(/\[\[(.+?)\]\]/g, '<b class="ax">$1</b>')
+      .replace(/\[A\]/g, '<b class="ax">A</b>').replace(/\[X\]/g, '<b class="ax">X</b>');
+  }
   // đoạn văn cách nhau bằng xuống dòng; dòng bắt đầu bằng "- " thành gạch đầu dòng
   function paras(s) {
     var out = '', li = [];
