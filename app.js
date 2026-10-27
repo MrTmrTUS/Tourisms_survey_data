@@ -1,13 +1,15 @@
 /* Khảo sát P1.6.1 — bản online.
    Câu hỏi, bản dịch, thứ tự cột: survey_data.js (sinh từ _build_P1.2/make_web161.py, không sửa tay). Cấu hình: config.js.
    Mã hóa theo codebook: thang 1–7; NB = 98; bỏ trống = 99; không hiển thị vì đã dừng ở câu sàng lọc = 97; MODE = 2.
-   Phải trả lời đủ câu trên trang mới sang trang. Mỗi lần mở hoặc tải lại trang là một phiên mới (không lưu tiến độ);
-   chỉ gửi khi bấm Gửi (SUBMITTED = 1), nên phiếu bỏ dở không vào sheet. Chưa tới được máy chủ thì bản ghi nằm trong
+   Phải trả lời đủ câu trên trang mới sang trang. Tiến độ chỉ giữ trong tab đang mở (sessionStorage, tối đa 2 giờ):
+   tải lại trang hoặc quay lại sau khi chuyển app thì làm tiếp; đóng tab hay mở tab mới là phiên mới; máy của nhóm (staff=1)
+   không giữ. Chỉ gửi khi bấm Gửi (SUBMITTED = 1), nên phiếu bỏ dở không vào sheet. Chưa tới được máy chủ thì bản ghi nằm trong
    hàng đợi trên máy và gửi lại. */
 (function () {
   'use strict';
   var S = window.SURVEY, C = window.SURVEY_CONFIG || {};
   var K_STATE = 'p161_state' /* chỉ để xóa tiến độ bản cũ để lại */, K_QUEUE = 'p161_queue', K_DONE = 'p161_done', K_SEQ = 'p161_seq';
+  var K_TAB = 'p161_tab', TAB_TTL = 2 * 3600 * 1000;      // tiến độ trong tab đang mở (sessionStorage), hết hạn sau 2 giờ
   var params = new URLSearchParams(location.search);
   var STAFF = params.get('staff') === '1', ADMIN = params.get('admin') === '1';
   var app = document.getElementById('app');
@@ -17,6 +19,25 @@
   function get(k, d) { try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
   function set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* bộ nhớ đầy hoặc bị chặn */ } }
   function del(k) { try { localStorage.removeItem(k); } catch (e) { } }
+  // tiến độ phiếu đang làm: chỉ trong tab này; máy của nhóm (staff=1) không giữ để người sau không thấy câu trả lời người trước
+  function saveTab() {
+    if (STAFF || !st || st.done) return;
+    try { sessionStorage.setItem(K_TAB, JSON.stringify({ at: Date.now(), st: st })); } catch (e) { }
+  }
+  function clearTab() { try { sessionStorage.removeItem(K_TAB); } catch (e) { } }
+  function loadTab() {
+    if (STAFF) return null;
+    var o = null;
+    try { o = JSON.parse(sessionStorage.getItem(K_TAB) || 'null'); } catch (e) { }
+    var s = o && o.st;
+    if (!s || s.done || s.v !== S.web_version || Date.now() - o.at > TAB_TTL || !langOf(s.lang) ||
+        !(s.page >= 0 && s.page < S.pages.length) || s.session !== cleanSession(params.get('s'))) { clearTab(); return null; }
+    // thời gian ở trang hiện tại tính tới lúc rời đi (lần lưu cuối), không tính lúc trang bị ẩn hay đang tải lại
+    var pid = S.pages[s.page].id;
+    s.times[pid] = (s.times[pid] || 0) + Math.max(0, o.at - s.enter) / 1000;
+    s.enter = Date.now();
+    return s;
+  }
 
   // ---------------- chữ ----------------
   function lang() { return (st && st.lang) || 'en'; }
@@ -206,7 +227,8 @@
   function renderLang() {
     document.documentElement.lang = 'en';
     var titles = S.langs.map(function (l) { return S.text['ui.lang_title'][l.code]; });
-    app.innerHTML = '<div class="lang-screen"><div class="lang-card"><h1>' + esc(S.text.title.en) + '</h1>' +
+    app.innerHTML = '<div class="lang-screen"><div class="lang-card"><img class="lang-logo" src="logo.png" alt="Thanh Dong University" width="72" height="72">' +
+      '<h1>' + esc(S.text.title.en) + '</h1>' +
       '<p class="sub">' + titles.map(esc).join(' · ') + '</p><div class="lang-list">' +
       S.langs.map(function (l) {
         return '<button class="lang-btn" data-lang="' + l.code + '" lang="' + htmlLang(l.code) + '">' + flag(l.flag) +
@@ -218,13 +240,14 @@
   }
 
   // ---------------- trang câu hỏi ----------------
+  var LOGO = '<img class="logo" src="logo.png" alt="" width="24" height="24">';
   function header(p) {
     var L = langOf(st.lang), pct = Math.round(st.page / S.pages.length * 100);
     var prog = p.part ? t('ui.progress', { p: p.part, n: S.n_parts }) : '';
     var langPart = st.page === 0
       ? '<button class="linkbtn lang" id="chlang" title="' + esc(t('ui.lang_title')) + '">' + flag(L.flag, 'sm') + '<span>' + esc(L.name) + '</span></button>'
       : '<span class="lang">' + flag(L.flag, 'sm') + '<span>' + esc(L.name) + '</span></span>';
-    return '<header class="top"><div class="top-in"><div class="brand">' + esc(t('title')) + '</div><div class="meta">' +
+    return '<header class="top"><div class="top-in"><div class="brand">' + LOGO + esc(t('title')) + '</div><div class="meta">' +
       (C.SHOW_TIMER ? '<span class="timer" id="timer" title="' + esc(t('ui.elapsed')) + '">00:00</span>' : '') + langPart + '</div></div>' +
       '<div class="bar"><i style="width:' + pct + '%"></i></div>' +
       '<div class="progress-txt"><span>' + esc(prog) + '</span><span>' + esc(t('ui.percent', { pct: pct })) + '</span></div></header>';
@@ -299,12 +322,12 @@
     app.querySelectorAll('input[type=radio]').forEach(function (inp) { inp.addEventListener('change', onAnswer); });
     document.getElementById('next').addEventListener('click', function () { next(p); });
     var bb = document.getElementById('back'); if (bb) bb.addEventListener('click', back);
-    var cl = document.getElementById('chlang'); if (cl) cl.addEventListener('click', function () { st = null; stopTimer(); renderLang(); });
-    startTimer(); showNet(); syncTop();
+    var cl = document.getElementById('chlang'); if (cl) cl.addEventListener('click', function () { st = null; clearTab(); stopTimer(); renderLang(); });
+    startTimer(); showNet(); syncTop(); saveTab();
   }
   function onAnswer(e) {
     var name = e.target.name, v = parseInt(e.target.value, 10);
-    st.ans[name] = v;
+    st.ans[name] = v; saveTab();
     var wrap = e.target.closest('[data-var]');
     if (wrap) {
       wrap.classList.remove('missing');
@@ -358,7 +381,7 @@
   function finish(stopVar) {
     leavePage(S.pages[st.page]);
     var now = new Date();
-    st.stopVar = stopVar; st.endTs = isoLocal(now); st.endMs = now.getTime(); st.done = true;
+    st.stopVar = stopVar; st.endTs = isoLocal(now); st.endMs = now.getTime(); st.done = true; clearTab();
     stopTimer();
     if (STAFF && !stopVar) return renderStaff();
     submitFinal();
@@ -384,7 +407,7 @@
     var title = stopped ? t('ui.stop_title') : t('thanks');
     var body = decline ? t('ui.decline_body') : (stopped ? t('ui.stop_body') : t('ui.thanks_body'));
     document.documentElement.lang = htmlLang(st.lang);
-    app.innerHTML = '<header class="top"><div class="top-in"><div class="brand">' + esc(t('title')) + '</div></div><div class="bar"><i style="width:100%"></i></div></header>' +
+    app.innerHTML = '<header class="top"><div class="top-in"><div class="brand">' + LOGO + esc(t('title')) + '</div></div><div class="bar"><i style="width:100%"></i></div></header>' +
       '<main><div class="card end"><div class="ico" id="endico">✓</div><h1>' + esc(title) + '</h1><p id="endbody" data-done="' + esc(body) + '"></p>' +
       '<button class="btn primary" id="retry" hidden>' + esc(t('ui.retry')) + '</button><p class="netmsg" id="net"></p>' +
       (STAFF ? '<button class="btn primary" id="newq" style="margin-top:16px">' + esc(S.staff['new'][0]) + ' · ' + esc(S.staff['new'][1]) + '</button>'
@@ -442,14 +465,19 @@
   // ---------------- khởi động ----------------
   function init() {
     window.addEventListener('online', flush);
-    document.addEventListener('visibilitychange', function () { if (!document.hidden) flush(); });   // quay lại trang (vd. sau khi nối Wi-Fi)
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden) flush();      // quay lại trang (vd. sau khi nối Wi-Fi)
+      else saveTab();                     // chuyển sang app khác: điện thoại có thể đóng tab nền, lưu lúc rời đi
+    });
+    window.addEventListener('pagehide', saveTab);
     window.addEventListener('resize', syncTop);
     setInterval(flush, 60000);
     if (ADMIN) { renderAdmin(); return; }
-    // mỗi lần mở hoặc tải lại trang là một phiên mới; tiến độ không lưu trên máy (máy dùng chung không lộ câu trả lời
-    // của người trước). Xóa tiến độ do bản cũ (trước 25/10/2026 tối) để lại. Hàng đợi chưa gửi (K_QUEUE) vẫn giữ và gửi tiếp.
+    // tiến độ chỉ giữ trong tab đang mở (loadTab); không có thì bắt đầu phiên mới. Xóa tiến độ do bản cũ (trước 25/10/2026 tối)
+    // để lại trong localStorage. Hàng đợi chưa gửi (K_QUEUE) vẫn giữ và gửi tiếp.
     del(K_STATE);
-    st = null; renderLang();
+    st = loadTab();
+    if (st) { renderPage(); toast(t('ui.resumed')); } else renderLang();
     window.addEventListener('popstate', function () { if (st && !st.done && st.page > 0) back(); });
     // tải lại/đóng trang khi đang làm dở (mất câu trả lời) hoặc khi phiếu chưa gửi được: trình duyệt hỏi lại
     window.addEventListener('beforeunload', function (e) {
