@@ -11,6 +11,6 @@ window.SURVEY_CONFIG = {
   // trường, nghiên cứu viên, điện thoại, email và cam kết bảo mật, nên ba dòng này để trống.
   RESEARCH_TEAM: "",
   CONTACT_EMAIL: "",
-  // Có thể ghi riêng cho từng ngôn ngữ: en, fr, ru, es, zh, ko, vi; thiếu ngôn ngữ nào thì dùng bản en.
+  // Có thể ghi riêng cho từng ngôn ngữ: en, fr, ru, es, zh, ko, ja, vi; thiếu ngôn ngữ nào thì dùng bản en.
   DATA_ACCESS: ""
 };
