@@ -13,6 +13,7 @@
 html { -webkit-text-size-adjust: 100%; }
 html, body { overscroll-behavior-y: contain; }   /* tắt kéo-xuống-để-tải-lại trên điện thoại: tải lại là mất phiếu đang làm */
 body { margin: 0; background: var(--bg); color: var(--text); font: 1rem/1.55 var(--font); overflow-wrap: break-word; }
+html:lang(ko) body { word-break: keep-all; }   /* tiếng Hàn: xuống dòng theo từ, không cắt giữa từ */
 button, input { font: inherit; }
 .noscript { padding: 24px; text-align: center; }
 
